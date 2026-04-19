@@ -15,27 +15,10 @@ volumes:
   corp_tokens:        # /opt/data/user_tokens/<telegram_id>.json
 
 services:
-  whisper-shim:
-    build:
-      context: ./whisper_shim
-    restart: unless-stopped
-    networks: [tasknet, monitoring]
-    ports:
-      - "9000:9000"
-    environment:
-      TRANSCRIBE_SERVICE_URL: ${TRANSCRIBE_SERVICE_URL:-http://ml-platform-big.company.loc:9204}
-      TRANSCRIBE_POLL_TIMEOUT: ${TRANSCRIBE_POLL_TIMEOUT:-120}
-    healthcheck:
-      test: ["CMD-SHELL", "python3 -c \"import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:9000/healthz',timeout=3).status==200 else 1)\""]
-      interval: 15s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
-    labels:
-      - "prometheus_scrape=false"   # shim не отдаёт метрики пока
-      - "app_name=whisper-shim"
-      - "app_type=backend"
-      - "version=0.2.0"
+  # whisper-shim удалён из compose: COMPANY Transcribe уже имеет OpenAI-совм.
+  # /api/v1/audio/transcriptions, Hermes ходит туда напрямую (см. hermes/config.yaml).
+  # Код shim'а оставлен в whisper_shim/ на случай если upstream API снова
+  # расходится и понадобится адаптер.
 
   metrics-sidecar:
     build:
@@ -68,9 +51,6 @@ services:
     image: nousresearch/hermes-agent
     restart: unless-stopped
     networks: [tasknet, monitoring]
-    depends_on:
-      whisper-shim:
-        condition: service_started
     command: ["gateway", "run"]
     ports:
       - "8642:8642"

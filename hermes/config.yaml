@@ -17,11 +17,10 @@ stt:
   enabled: true
   provider: "openai"
   openai:
-    # Наш shim-контейнер — OpenAI-совместимый /v1/audio/transcriptions поверх
-    # async API COMPANY Transcribe. tools/transcription_tools.py читает эти
-    # поля ИЗ config.yaml, env-переменные для STT игнорируются — URL shim'а
-    # зашит тут.
-    base_url: "http://whisper-shim:9000/v1"
+    # COMPANY Transcribe уже выставляет OpenAI-совместимый
+    # /api/v1/audio/transcriptions — идём прямо, без shim-прослойки.
+    # Доступно только изнутри корп.сети (company.loc не резолвится вне VPN).
+    base_url: "http://ml-platform-big.company.loc:9204/api/v1"
     api_key: "dummy-ignored"
     model: "whisper-1"
 
@@ -30,11 +29,23 @@ platforms:
     enabled: true
     reply_to_mode: "first"
 
-# Полный пресет hermes-telegram: terminal_tool (нужен всем нашим REST-скиллам:
-# jira/confluence/gitlab/setup), send_message (для team_message), skills,
-# todo, browser, web, file, vision, image_gen, tts, cronjob.
+# Кастомный набор = hermes-telegram минус `tts`. TTS триггерит эвристику
+# "voice in → voice out", которая пытается отправить голосовой ответ;
+# если у пользователя в Telegram Privacy → Voice Messages стоит "Nobody",
+# Telegram отбивает с `Voice_messages_forbidden` и засоряет логи. Входящие
+# голосовые всё равно обрабатываются (STT не зависит от этого toolset'а).
 platform_toolsets:
-  telegram: [hermes-telegram]
+  telegram:
+    - terminal       # REST-вызовы из jira/confluence/gitlab/setup skills
+    - file
+    - web
+    - vision
+    - image_gen
+    - browser
+    - skills
+    - todo
+    - cronjob
+    - send_message   # для team_message (cross-user DM + broadcast)
 
 # MCP-серверы не используем для этого пилота. У on-prem Jira / Confluence /
 # GitLab нет MCP из коробки, а Atlassian Cloud Remote MCP требует OAuth 2.1 —
