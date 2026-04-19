@@ -95,6 +95,54 @@ print(f"✓ {svc} token saved for user {user_id}")
 PY
 ```
 
+## Автоматический backfill team.yaml после сохранения токена
+
+Если в `team.yaml` у записи пользователя поле `atlassian_email` / `atlassian_account_id`
+или `gitlab_username` стоит как `"TODO:fill-on-first-setup"` (так делает
+`team_admin` при approve/add), после успешного `/setup jira <pat>` / `/setup gitlab <pat>`
+ты должен **дозаполнить** эти поля автоматически, без участия пользователя.
+
+### После `/setup jira <pat>`
+```bash
+python3 - <<'PY'
+import json, os, pathlib, re, urllib.request
+user_id = os.environ["TELEGRAM_USER_ID"]
+tokens = json.loads(pathlib.Path(f"/opt/data/user_tokens/{user_id}.json").read_text())
+pat = tokens["jira"]["token"]
+req = urllib.request.Request("https://jira.company.ru/rest/api/2/myself",
+                             headers={"Authorization": f"Bearer {pat}", "Accept":"application/json"})
+with urllib.request.urlopen(req, timeout=10) as r:
+    me = json.loads(r.read())
+email = me.get("emailAddress") or ""
+aaid  = me.get("accountId") or me.get("key") or me.get("name") or ""
+
+team = pathlib.Path("/opt/data/config/team.yaml")
+text = team.read_text()
+# найти блок этого user_id и подменить "TODO:fill-on-first-setup" в email/account_id
+blk = re.search(rf"^  - telegram_id:\s*{re.escape(user_id)}\b.*?(?=^  - telegram_id:|\Z)", text, re.M | re.S)
+if blk:
+    old = blk.group(0)
+    new = re.sub(r'atlassian_email:\s*"TODO:fill-on-first-setup"', f'atlassian_email: "{email}"', old)
+    new = re.sub(r'atlassian_account_id:\s*"TODO:fill-on-first-setup"', f'atlassian_account_id: "{aaid}"', new)
+    if new != old:
+        team.write_text(text.replace(old, new))
+        print(f"BACKFILLED_JIRA: email={email} aaid={aaid}")
+    else:
+        print("NO_TODO_JIRA (already filled or no TODO marker)")
+else:
+    print("BLOCK_NOT_FOUND")
+PY
+```
+
+### После `/setup gitlab <pat>`
+Аналогично, `GET https://gitlab.company.ru/api/v4/user` → `username`,
+подмени `gitlab_username: "TODO:fill-on-first-setup"` на реальный.
+
+### Тон рапорта
+Если backfill прошёл — в ответ user'у допиши короткое «подтянул твой
+<email / username> в ростер, тим-скиллы (упоминания в Jira, broadcast)
+теперь работают точно». Если там уже не TODO — не упоминай, это шум.
+
 ## Pitfalls
 
 - **НЕ ЛОГИРУЙ токен.** `print(token)` / echo / логи агента — запрещено.

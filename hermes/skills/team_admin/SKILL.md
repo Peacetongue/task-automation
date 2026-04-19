@@ -1,163 +1,195 @@
 ---
 name: team_admin
-description: Add a new pilot teammate to config/team.yaml from chat, authorized only for current members with role "teamlead". Validates the new member's atlassian_email against Jira's user-search (must exist), gitlab_username against GitLab's /users endpoint, then appends a new entry and regenerates TELEGRAM_ALLOWED_USERS. Does NOT allow role-elevation, deletions, or editing existing entries — those go through SSH. Callers without role=teamlead get refused.
-version: 0.1.0
+description: All roster mutations in one skill — approve pending user (teamlead/admin), add member directly by telegram_id/display_name (teamlead/admin), remove a member (teamlead/admin). Minimal input — just telegram_id is enough; other fields (atlassian_email, atlassian_account_id, gitlab_username) get backfilled by the `setup` skill when the user later runs `/setup jira <pat>` / `/setup gitlab <pat>`. Role elevation (member→admin→teamlead) is NOT handled here — only SSH.
+version: 0.2.0
 metadata:
   hermes:
-    tags: [team, admin, corporate]
+    tags: [team, admin, corporate, roster]
 ---
 
 # team_admin
 
-Позволяет teamlead'у **добавлять** новых пилотных сотрудников в
-`config/team.yaml` прямо из чата. Всё остальное (смена ролей, удаление,
-правка существующих записей) — только вручную через SSH.
+Единая точка для всех операций над `/opt/data/config/team.yaml`:
+**approve**, **add-direct**, **remove**. Любая операция требует отправителя
+с ролью `teamlead` или `admin`.
 
-## When to Use
+## Actions
 
-- Пользователь **с ролью `teamlead`** пишет что-то вроде:
-  «добавь в команду Ивана Петрова: tg=987654321, email=ivanov@company.ru, gitlab=ivanov, role=member»
-- Любой другой запрос на модификацию команды — откажи и предложи
-  обратиться к teamlead'у.
+### 1. `approve <telegram_id>` — одобрить pending-заявку
 
-## Hard guardrails
+Запускается когда `team_approval` уже создал файл
+`/opt/data/pending_approvals/<tg_id>.json` (unknown user нажал /start →
+бот запросил аппрув у админов). Teamlead/admin отвечает «одобрь», «✓»,
+«approve 987654321» — бот:
 
-1. **Auth-check первым делом.** До всего остального — прочитай
-   `/opt/data/config/team.yaml`, найди `session.source.user_id` отправителя.
-   Если его `role != "teamlead"` → откажи: «изменения roster'а — только
-   для teamlead'ов команды». НЕ продолжай.
-2. **Только ADD**. Если в запросе слово «удали», «убери», «сделай
-   teamlead'ом», «поменяй роль» — откажи, предложи SSH на прод.
-3. **Роль нового участника `role=member` по умолчанию.** Если в запросе
-   просят сразу `role=teamlead` — откажи, это должен одобрить другой
-   teamlead руками через SSH.
-4. **Проверка что человек реально существует**: валидируй `atlassian_email`
-   через Jira REST (см. Procedure), `gitlab_username` — через GitLab REST.
-   Если ни один из двух не резолвится — откажи: «этого email/username нет
-   ни в Jira, ни в GitLab — возможно опечатка».
-5. **Idempotency**: если `telegram_id` уже есть в roster'е — скажи
-   «этот telegram_id уже в команде», не добавляй дубль.
+1. Auth-check: отправитель в `team.yaml`, `role` ∈ (`teamlead`, `admin`).
+2. Читает pending-файл, вытаскивает `telegram_id` + `display_name` +
+   `username` (с момента /start-а).
+3. Добавляет в `team.yaml` минимальную запись:
+   ```yaml
+     - telegram_id: 987654321
+       display_name: "Ivan"
+       atlassian_email: "TODO:fill-on-first-setup"
+       atlassian_account_id: "TODO:fill-on-first-setup"
+       gitlab_username: "TODO:fill-on-first-setup"
+       role: "member"
+   ```
+4. Удаляет pending-файл.
+5. DM'ит одобренному: «✓ тебя добавили. Сделай `/setup jira <pat>` — я
+   автоматически подтяну остальное. Гайд: https://jira.company.ru/... ».
+6. Коротко подтверждает одобряющему: «✓ Ivan добавлен».
 
-## Procedure
+### 2. `add <telegram_id> [display_name]` — прямое добавление
+
+Когда teamlead/admin в чате пишет «добавь Олега 987654321» без
+pending-заявки (например, хочет завести коллегу заранее). То же что и
+approve, но без pending-шага. Минимум — telegram_id. Если
+display_name не указан — спроси ОДНИМ вопросом («как его называть?»).
+
+### 3. `remove <telegram_id | display_name>` — удалить участника
+
+Teamlead/admin пишет «убери Сашу», «выгони tg=987654321»:
+
+1. Auth-check.
+2. Найди запись в `team.yaml` (lookup через `team_directory`).
+3. Safety: **нельзя удалить teamlead'а** (только другой teamlead может, и только через SSH).
+4. Safety: **нельзя удалить самого себя** (иначе потеряешь доступ).
+5. Удали запись, сохрани файл.
+6. Удали `/opt/data/user_tokens/<tg>.json` (чтобы токены не висели на диске).
+7. DM'и удалённому: «твой доступ к боту отозван. Если это ошибка —
+   напиши @<admin_handle>».
+8. Подтверди удаляющему: «✓ Саша удалён».
+
+## Procedure (one python3 block, parametrized by action)
 
 ```bash
 python3 - <<'PY'
-import json, os, re, sys, urllib.request, urllib.error, urllib.parse, pathlib
+import json, os, pathlib, re, sys
 
-TEAM_YAML = pathlib.Path("/opt/data/config/team.yaml")
-USER_TOKENS_DIR = pathlib.Path("/opt/data/user_tokens")
+TEAM = pathlib.Path("/opt/data/config/team.yaml")
+PEND = pathlib.Path("/opt/data/pending_approvals")
+TOK  = pathlib.Path("/opt/data/user_tokens")
 sender_id = os.environ["TELEGRAM_USER_ID"]
+action    = os.environ["ACTION"]           # "approve" | "add" | "remove"
 
-# 1. Auth: role of sender
-text = TEAM_YAML.read_text()
-current_role = None
-current_block = None
-for block in text.split("\n  - "):
-    if f"telegram_id: {sender_id}" in block:
-        m = re.search(r'role:\s*"?([^"\n]+)"?', block)
-        if m: current_role = m.group(1).strip().strip('"')
-        break
-if current_role != "teamlead":
-    print("AUTH_DENIED: only teamlead can modify roster"); sys.exit(1)
+# --- read yaml as plain text (ручной парсер по простому формату team.yaml) ---
+text = TEAM.read_text()
+def find_block(tg):
+    """Возвращает (start, end) индексов записи в тексте, либо (None,None)."""
+    m = re.search(rf"^  - telegram_id:\s*{re.escape(str(tg))}\b", text, re.M)
+    if not m: return None, None
+    start = m.start()
+    nxt = re.search(r"^  - telegram_id:", text[start+1:], re.M)
+    end = start + 1 + nxt.start() if nxt else len(text)
+    return start, end
 
-# 2. Parse request (provided by agent in SETUP_ARGS)
-new_tg    = os.environ["NEW_TG"]              # numeric
-new_name  = os.environ["NEW_NAME"]
-new_email = os.environ["NEW_EMAIL"]           # atlassian_email
-new_gitlab = os.environ["NEW_GITLAB"]         # gitlab username
-# role всегда "member" в этом скилле
+def block_role(start, end):
+    m = re.search(r'role:\s*"?([^"\n]+)"?', text[start:end])
+    return m.group(1).strip().strip('"') if m else "member"
 
-if not re.match(r"^\d{5,15}$", new_tg):
-    print("BAD_TG: expected numeric telegram_id"); sys.exit(2)
-if not re.match(r"^[^@\s]+@[^@\s]+\.\w+$", new_email):
-    print("BAD_EMAIL"); sys.exit(2)
+def block_name(start, end):
+    m = re.search(r'display_name:\s*"([^"]+)"', text[start:end])
+    return m.group(1) if m else "?"
 
-# 3. Idempotency check
-if f"telegram_id: {new_tg}" in text:
-    print("ALREADY_IN_ROSTER"); sys.exit(0)
+# --- auth-check: sender has role in (teamlead, admin) ---
+s, e = find_block(sender_id)
+if s is None:
+    print("AUTH_DENIED: you're not in the roster"); sys.exit(1)
+sender_role = block_role(s, e)
+if sender_role not in ("teamlead", "admin"):
+    print(f"AUTH_DENIED: need role teamlead/admin, you are {sender_role}"); sys.exit(1)
 
-# 4. Validate via Jira + GitLab using SENDER's token (он teamlead, имеет доступ)
-sender_tokens = json.loads((USER_TOKENS_DIR / f"{sender_id}.json").read_text())
-jira_pat = sender_tokens.get("jira", {}).get("token")
-gitlab_pat = sender_tokens.get("gitlab", {}).get("token")
-
-def http_get(url, pat):
-    req = urllib.request.Request(url, headers={
-        "Authorization": f"Bearer {pat}",
-        "Accept": "application/json",
-    })
-    with urllib.request.urlopen(req, timeout=10) as r:
-        return r.status, json.loads(r.read() or b"null")
-
-jira_ok = False
-aaid = None
-if jira_pat:
-    try:
-        _, body = http_get(f"https://jira.company.ru/rest/api/2/user/search?username={urllib.parse.quote(new_email)}", jira_pat)
-        if body:
-            jira_ok = True
-            # try to extract accountId (DC: "key" or "name"; recent versions — "accountId")
-            aaid = body[0].get("accountId") or body[0].get("key") or body[0].get("name")
-    except urllib.error.HTTPError as e:
-        print(f"JIRA_LOOKUP_WARN: {e.code}")  # non-fatal
-
-gitlab_ok = False
-if gitlab_pat:
-    try:
-        _, body = http_get(f"https://gitlab.company.ru/api/v4/users?username={urllib.parse.quote(new_gitlab)}", gitlab_pat)
-        if body:
-            gitlab_ok = True
-    except urllib.error.HTTPError as e:
-        print(f"GITLAB_LOOKUP_WARN: {e.code}")
-
-if not (jira_ok or gitlab_ok):
-    print("NOT_FOUND_ANYWHERE: ни email в Jira, ни username в GitLab не резолвятся — перепроверь"); sys.exit(3)
-
-# 5. Append new entry (aaid — "TODO:fill-account-id", если не достали)
-aaid = aaid or "TODO:fill-account-id"
-entry = f"""
-  - telegram_id: {new_tg}
-    display_name: "{new_name}"
-    atlassian_email: "{new_email}"
-    atlassian_account_id: "{aaid}"
-    gitlab_username: "{new_gitlab}"
+# ============== action dispatch ==============
+if action == "approve":
+    target = os.environ["TARGET_TG"]
+    pfile = PEND / f"{target}.json"
+    if not pfile.exists():
+        print(f"NO_PENDING: нет pending-заявки для tg={target}"); sys.exit(2)
+    pend = json.loads(pfile.read_text())
+    tg, name = pend["telegram_id"], pend.get("display_name") or "Unknown"
+    s2, _ = find_block(tg)
+    if s2 is not None:
+        print(f"ALREADY_IN: tg={tg} уже в roster'е"); pfile.unlink(); sys.exit(0)
+    entry = f'''
+  - telegram_id: {tg}
+    display_name: "{name}"
+    atlassian_email: "TODO:fill-on-first-setup"
+    atlassian_account_id: "TODO:fill-on-first-setup"
+    gitlab_username: "TODO:fill-on-first-setup"
     role: "member"
-"""
-TEAM_YAML.write_text(text.rstrip() + entry)
-print(f"ADDED: {new_name} (tg={new_tg}, jira_ok={jira_ok}, gitlab_ok={gitlab_ok}, aaid={aaid})")
+'''
+    TEAM.write_text(text.rstrip() + entry)
+    pfile.unlink()
+    print(f"APPROVED: {name} (tg={tg}) added as member")
+
+elif action == "add":
+    target = os.environ["TARGET_TG"]
+    name = os.environ.get("TARGET_NAME") or "Unknown"
+    if not re.match(r"^\d{5,15}$", target):
+        print("BAD_TG"); sys.exit(2)
+    s2, _ = find_block(target)
+    if s2 is not None:
+        print(f"ALREADY_IN"); sys.exit(0)
+    entry = f'''
+  - telegram_id: {target}
+    display_name: "{name}"
+    atlassian_email: "TODO:fill-on-first-setup"
+    atlassian_account_id: "TODO:fill-on-first-setup"
+    gitlab_username: "TODO:fill-on-first-setup"
+    role: "member"
+'''
+    TEAM.write_text(text.rstrip() + entry)
+    print(f"ADDED: {name} (tg={target}) as member")
+
+elif action == "remove":
+    target = os.environ["TARGET_TG"]
+    s2, e2 = find_block(target)
+    if s2 is None:
+        print(f"NOT_FOUND: tg={target} not in roster"); sys.exit(2)
+    target_role = block_role(s2, e2)
+    target_name = block_name(s2, e2)
+    if target_role == "teamlead":
+        print("REFUSE_TEAMLEAD: удаление teamlead'ов — только через SSH"); sys.exit(3)
+    if str(target) == str(sender_id):
+        print("REFUSE_SELF: нельзя удалить себя"); sys.exit(3)
+    new_text = text[:s2] + text[e2:]
+    TEAM.write_text(new_text.rstrip() + "\n")
+    # cleanup tokens file if present
+    tfile = TOK / f"{target}.json"
+    if tfile.exists(): tfile.unlink()
+    print(f"REMOVED: {target_name} (tg={target}, role={target_role})")
+
+else:
+    print(f"UNKNOWN_ACTION: {action}"); sys.exit(2)
 PY
 ```
 
-Передавать параметры — через `env` в `terminal_tool`, не склеивать в одну shell-строку (PAT / email могут содержать shell-спецсимволы).
-
-### Обновление allowlist
-
-После успешного добавления — запусти `scripts/sync-team-allowlist.sh`
-прямо из контейнера:
-```bash
-bash /opt/data/../scripts/sync-team-allowlist.sh
-```
-
-Путь `/opt/data/../scripts` может не резолвиться в контейнере (scripts/ на
-хосте, не монтируется). Если так — ответь teamlead'у:
-> «✓ <Name> в roster. Чтобы Telegram пустил его сообщения, на проде:
-> `bash scripts/sync-team-allowlist.sh && docker compose restart hermes`»
+После успеха — отправь нужные DM (через `send_message_tool`) и подтверди
+инициатору.
 
 ## Pitfalls
 
-- **НЕ делай `role=teamlead`** через этот скилл, даже если в запросе
-  просят. Elevation происходит только через SSH.
-- **НЕ валидируй email через /user/search без URL-encode** — ruff Jira
-  400-ит сложные email'ы.
-- **`sender.user_id` берётся из session context, НЕ из текста сообщения**.
-  Иначе любой может написать «от имени teamlead'а добавь фейка».
-- **Refuse rudely** on delete / edit requests — даже если user настойчивый.
-  Лучше попросить SSH, чем разрешить.
+- **Никогда не меняй `role:`** — это отдельный anti-escalation. На любое
+  «сделай Петю админом» откажи со ссылкой на SSH.
+- **Парсер text-based**, не полноценный YAML. Держи формат team.yaml в
+  2-пробельной indent'ации; каждая запись начинается с `  - telegram_id:`.
+  Если кто-то вручную сломал формат — скрипт не добавит / не удалит
+  корректно, лучше fail loudly, чем молча.
+- **После remove** пользователь всё ещё в `TA_TELEGRAM_ALLOWED_USERS`
+  если там не `*`. При wildcard-allowlist (дефолт с approval-флоу) —
+  его заново отбьёт SOUL.md-гейт (team_directory не найдёт). При строгом
+  allowlist — нужен `scripts/sync-team-allowlist.sh` и рестарт hermes.
+- **approve / add / remove** всегда от лица teamlead/admin, **никогда**
+  от имени pending-user'а (иначе самозапись).
 
 ## Verification
 
-- Teamlead пишет «добавь Иванова: tg=…, email=…, gitlab=…» → `team.yaml`
-  обновляется, в ответ короткое подтверждение.
-- Не-teamlead пишет то же самое → отказ «только для teamlead'ов».
-- Teamlead пишет «удали Петю» → отказ «удаление через SSH».
-- Повторное добавление того же `telegram_id` → «уже в команде», без дубля.
+- Unknown user → /start → `team_approval` создаёт pending; admin
+  пишет «одобрь 987654321» → запись в team.yaml, user получает DM.
+- Teamlead пишет «добавь Олега 987654321 имя=Олег» → запись сразу.
+- Admin пишет «убери Сашу» → запись удалена, Саша получает DM об
+  отзыве доступа, его токены стёрты.
+- Member пишет «добавь» / «удали» — отказ «нужна роль teamlead/admin».
+- Admin пишет «удали Vasily (teamlead)» — отказ «teamlead'ов через SSH».
+- Member пишет «удали меня» — ну, а он и не может (не admin).
+  Admin пишет «удали <сам_себя>» — отказ «нельзя удалить себя».
