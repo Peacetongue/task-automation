@@ -1,28 +1,26 @@
-# Hermes config for task-automation stack.
+# Hermes config for corporate team assistant.
 #
-# Всё, что не задано здесь, наследуется из дефолтного cli-config.yaml.example
-# внутри образа (entrypoint копирует его в /opt/data/config.yaml только если
-# файла нет — у нас он есть, поэтому наш файл выигрывает).
-#
-# Мы намеренно НЕ переопределяем секции skills/memory/cron/browser/... —
-# базовый Hermes со всеми встроенными возможностями остаётся доступен.
+# Остальное, что не задано здесь, наследуется из дефолтного
+# cli-config.yaml.example внутри образа. Мы намеренно НЕ переопределяем
+# секции skills/memory/cron/browser/... — базовый Hermes со всеми
+# встроенными возможностями остаётся доступен.
 
 model:
-  # Для имени модели env-substitution в Hermes ломается на auxiliary-пути —
-  # зашиваем литералом. Формат обязательно "Provider/Name".
+  # Формат обязательно "Provider/Name". env-substitution в Hermes ломается
+  # на auxiliary-пути — зашиваем литералом.
   default: "InHouse/Qwen3.5-122B"
-  provider: "custom"                # кастомный OpenAI-совместимый эндпоинт
-  base_url: "${OPENAI_BASE_URL}"    # подставляется из env на старте
+  provider: "custom"
+  base_url: "${OPENAI_BASE_URL}"           # подставится из env на старте
   # api_key подхватится автоматически из env OPENAI_API_KEY
 
 stt:
   enabled: true
   provider: "openai"
   openai:
-    # Наш shim-контейнер выставляет OpenAI-совместимый /v1/audio/transcriptions
-    # поверх async API COMPANY Transcribe. tools/transcription_tools.py читает
-    # эти поля ИЗ config.yaml, env-переменные для STT игнорируются — поэтому
-    # URL shim'а зашит тут, а не в .env.
+    # Наш shim-контейнер — OpenAI-совместимый /v1/audio/transcriptions поверх
+    # async API COMPANY Transcribe. tools/transcription_tools.py читает эти
+    # поля ИЗ config.yaml, env-переменные для STT игнорируются — URL shim'а
+    # зашит тут.
     base_url: "http://whisper-shim:9000/v1"
     api_key: "dummy-ignored"
     model: "whisper-1"
@@ -30,31 +28,17 @@ stt:
 platforms:
   telegram:
     enabled: true
-    # "first" = отвечаем на первое сообщение в серии, последующие подхватываем
-    # без явной реплаи-цепочки. Удобно для длинных голосовых + текстовых.
     reply_to_mode: "first"
 
-# Полный пресет hermes-telegram, включая cronjob (пользователь хочет
-# оставить возможность ставить периодические напоминания). Разграничение
-# "это cron vs это задача в Vikunja" живёт в SOUL.md как жёсткая
-# процедура — модель не должна путать их.
+# Полный пресет hermes-telegram: terminal_tool (нужен всем нашим REST-скиллам:
+# jira/confluence/gitlab/setup), send_message (для team_message), skills,
+# todo, browser, web, file, vision, image_gen, tts, cronjob.
 platform_toolsets:
   telegram: [hermes-telegram]
 
-mcp_servers:
-  # TODO: Atlassian Remote MCP для синка с Jira.
-  # Официальный endpoint: https://mcp.atlassian.com/v1/mcp, OAuth 2.1.
-  # Первый хендшейк делается вручную:
-  #   docker compose exec hermes hermes mcp auth atlassian
-  # После этого токены лежат в /opt/data/mcp/ и подхватываются автоматом.
-  # Раскомментировать и перезапустить hermes, когда появится нужда.
-  #
-  # atlassian:
-  #   url: "https://mcp.atlassian.com/v1/mcp"
-  #   auth: oauth
-  #   timeout: 60
-  #   tools:
-  #     include:
-  #       - createJiraIssue
-  #       - getJiraIssue
-  #       - searchJiraIssuesUsingJql
+# MCP-серверы не используем для этого пилота. У on-prem Jira / Confluence /
+# GitLab нет MCP из коробки, а Atlassian Cloud Remote MCP требует OAuth 2.1 —
+# слишком жирно для pilot'а. Вместо MCP — обычные skills, вызывающие REST
+# через terminal_tool + python3 + urllib.request, с per-user PAT из
+# /opt/data/user_tokens/<telegram_id>.json (см. skill `setup`).
+mcp_servers: {}

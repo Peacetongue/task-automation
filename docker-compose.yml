@@ -3,75 +3,23 @@ name: task-automation
 networks:
   tasknet:
     driver: bridge
+  # Корп. мониторинг сканирует контейнеры в этой сети через Docker SD.
+  # На prod эта сеть создаётся devops'ом (external: true).
+  # Локально создать один раз: `docker network create monitoring`
+  # (smoke_test / README напоминают).
+  monitoring:
+    external: true
 
 volumes:
-  pgdata:
-  vikunja_files:
   hermes_state:
+  corp_tokens:        # /opt/data/user_tokens/<telegram_id>.json
 
 services:
-  postgres:
-    image: postgres:18
-    restart: unless-stopped
-    networks: [tasknet]
-    environment:
-      POSTGRES_USER: vikunja
-      POSTGRES_PASSWORD: ${VIKUNJA_DB_PASSWORD:?VIKUNJA_DB_PASSWORD must be set in .env}
-      POSTGRES_DB: vikunja
-    volumes:
-      # postgres:18 хочет маунт в /var/lib/postgresql (не .../data) —
-      # данные кладёт в /var/lib/postgresql/{major-version}/docker.
-      - pgdata:/var/lib/postgresql
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U vikunja -d vikunja"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-
-  vikunja-init:
-    # Named volume mountpoint на macOS создаётся как root:root, а Vikunja
-    # стартует под uid=1000 и падает с "permission denied" при записи
-    # /app/vikunja/files. Одноразовый init-контейнер фиксит owner до того,
-    # как Vikunja попробует писать.
-    image: alpine:3.20
-    command: ["chown", "-R", "1000:1000", "/app/vikunja/files"]
-    volumes:
-      - vikunja_files:/app/vikunja/files
-    restart: "no"
-
-  vikunja:
-    image: vikunja/vikunja:2.3.0
-    restart: unless-stopped
-    networks: [tasknet]
-    depends_on:
-      postgres:
-        condition: service_healthy
-      vikunja-init:
-        condition: service_completed_successfully
-    ports:
-      - "3456:3456"
-    environment:
-      VIKUNJA_SERVICE_PUBLICURL: ${VIKUNJA_PUBLIC_URL:-http://localhost:3456/}
-      # Vikunja 2.3 переименовала JWTSECRET → SECRET (старое имя работает,
-      # но сыпет deprecation warning и задваивает конфиг).
-      VIKUNJA_SERVICE_SECRET: ${VIKUNJA_SERVICE_SECRET:?VIKUNJA_SERVICE_SECRET must be set in .env (openssl rand -hex 32)}
-      VIKUNJA_DATABASE_TYPE: postgres
-      VIKUNJA_DATABASE_HOST: postgres
-      VIKUNJA_DATABASE_USER: vikunja
-      VIKUNJA_DATABASE_PASSWORD: ${VIKUNJA_DB_PASSWORD}
-      VIKUNJA_DATABASE_DATABASE: vikunja
-    volumes:
-      - vikunja_files:/app/vikunja/files
-    # Healthcheck намеренно отсутствует: образ Vikunja distroless — ни
-    # /bin/sh, ни wget, ни curl. Проверка готовности делается со стороны
-    # whisper-shim/hermes через их собственные healthcheck/retry, плюс
-    # scripts/smoke_test.sh бьёт /api/v1/info уже с хоста.
-
   whisper-shim:
     build:
       context: ./whisper_shim
     restart: unless-stopped
-    networks: [tasknet]
+    networks: [tasknet, monitoring]
     ports:
       - "9000:9000"
     environment:
@@ -83,14 +31,44 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+    labels:
+      - "prometheus_scrape=false"   # shim не отдаёт метрики пока
+      - "app_name=whisper-shim"
+      - "app_type=backend"
+      - "version=0.2.0"
+
+  metrics-sidecar:
+    build:
+      context: ./metrics_sidecar
+    restart: unless-stopped
+    networks: [tasknet, monitoring]
+    ports:
+      - "8000:8000"
+    environment:
+      HERMES_LOG_PATH: /hermes_data/logs/agent.log
+      HERMES_STATE_DB: /hermes_data/state.db
+    volumes:
+      # Read-only mount of hermes' /opt/data so we can tail logs + query state.db.
+      - ./hermes:/hermes_data:ro
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz',timeout=3).status==200 else 1)\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    labels:
+      - "prometheus_scrape=true"
+      - "prometheus_port=8000"
+      - "prometheus_path=/metrics"
+      - "app_name=hermes-metrics"
+      - "app_type=backend"
+      - "version=0.2.0"
 
   hermes:
     image: nousresearch/hermes-agent
     restart: unless-stopped
-    networks: [tasknet]
+    networks: [tasknet, monitoring]
     depends_on:
-      vikunja:
-        condition: service_started
       whisper-shim:
         condition: service_started
     command: ["gateway", "run"]
@@ -102,10 +80,15 @@ services:
       TELEGRAM_ALLOWED_USERS: ${TELEGRAM_ALLOWED_USERS:?TELEGRAM_ALLOWED_USERS must be set in .env}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:?OPENAI_BASE_URL must be set in .env}
       OPENAI_API_KEY: ${OPENAI_API_KEY:?OPENAI_API_KEY must be set in .env}
-      HERMES_MODEL: ${HERMES_MODEL:?HERMES_MODEL must be set (Provider/Name)}
-      VIKUNJA_BASE_URL: http://vikunja:3456
-      VIKUNJA_API_TOKEN: ${VIKUNJA_API_TOKEN:?VIKUNJA_API_TOKEN must be set in .env}
-      VIKUNJA_DEFAULT_PROJECT_ID: ${VIKUNJA_DEFAULT_PROJECT_ID:-1}
     volumes:
       - ./hermes:/opt/data
+      - ./config:/opt/data/config:ro         # team.yaml для team_directory skill
       - hermes_state:/opt/data/sessions
+      - corp_tokens:/opt/data/user_tokens    # PAT-ы пользователей per-user
+    labels:
+      # Сам Hermes метрик не отдаёт — метрики про него экспортирует
+      # metrics-sidecar. Но метим контейнер общими info-метками.
+      - "prometheus_scrape=false"
+      - "app_name=hermes-gateway"
+      - "app_type=backend"
+      - "version=0.2.0"

@@ -1,0 +1,29 @@
+# Team roster для пилота корпоративного Hermes-ассистента.
+#
+# Этот файл — источник правды для:
+#   1. TELEGRAM_ALLOWED_USERS в .env (синк через scripts/sync-team-allowlist.sh).
+#   2. skills/team_directory/ — лукап «по имени» → telegram_id / atlassian / gitlab.
+#   3. skills/team_message/ — cross-user DM и broadcast.
+#
+# Реальный team.yaml НЕ коммитится (см. .gitignore). Скопируй этот файл
+# в team.yaml и заполни настоящими данными:
+#   cp config/team.yaml.example config/team.yaml
+#
+# Добавил нового сотрудника — прогони:
+#   bash scripts/sync-team-allowlist.sh
+#   docker compose restart hermes
+
+team:
+  - telegram_id: 111111111         # numeric ID от @userinfobot
+    display_name: "Paul"           # как бот будет называть человека в ответах
+    atlassian_email: "paul@company.ru"
+    atlassian_account_id: "557058:00000000-0000-0000-0000-000000000000"
+    gitlab_username: "paul"
+    role: "teamlead"               # teamlead | dev | qa | pm | ops
+
+  - telegram_id: 222222222
+    display_name: "Vasya"
+    atlassian_email: "vasya@company.ru"
+    atlassian_account_id: "557058:11111111-1111-1111-1111-111111111111"
+    gitlab_username: "vasya"
+    role: "dev"
