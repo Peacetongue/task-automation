@@ -4,4 +4,6 @@
 * filter=sanitize
 
 # Shell scripts must not be sanitized in a way that breaks LF.
+# git-unsanitize.sh must bypass smudge so the executable exists before other paths are checked out.
 scripts/git-sanitize.sh -filter
+scripts/git-unsanitize.sh -filter
