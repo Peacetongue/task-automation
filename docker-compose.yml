@@ -28,8 +28,12 @@ services:
     ports:
       - "9000:9000"
     environment:
-      TRANSCRIBE_SERVICE_URL: ${TRANSCRIBE_SERVICE_URL:-http://ml-platform-big.company.loc:9204}
-      TRANSCRIBE_POLL_TIMEOUT: ${TRANSCRIBE_POLL_TIMEOUT:-120}
+      # TA_-префикс в .env чтобы shell env случайно не перебивал
+      # (export TRANSCRIBE_SERVICE_URL где-нибудь в .bashrc ломал бы сборку).
+      # Внутрь контейнера приходит обычное имя — whisper_shim/app.py
+      # читает TRANSCRIBE_SERVICE_URL без префикса.
+      TRANSCRIBE_SERVICE_URL: ${TA_TRANSCRIBE_SERVICE_URL:-http://ml-platform-big.company.loc:9204}
+      TRANSCRIBE_POLL_TIMEOUT: ${TA_TRANSCRIBE_POLL_TIMEOUT:-120}
     healthcheck:
       test: ["CMD-SHELL", "python3 -c \"import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:9000/healthz',timeout=3).status==200 else 1)\""]
       interval: 15s
@@ -81,10 +85,16 @@ services:
       - "8642:8642"
     environment:
       HERMES_UID: "10000"
-      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?TELEGRAM_BOT_TOKEN must be set in .env}
-      TELEGRAM_ALLOWED_USERS: ${TELEGRAM_ALLOWED_USERS:?TELEGRAM_ALLOWED_USERS must be set in .env}
-      OPENAI_BASE_URL: ${OPENAI_BASE_URL:?OPENAI_BASE_URL must be set in .env}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:?OPENAI_API_KEY must be set in .env}
+      # Все чувствительные секреты приходят через TA_*-ключи в .env,
+      # чтобы shell не мог их случайно перебить (на dev мы на эту
+      # грабилью неоднократно наступали — см. коммит-историю про
+      # "stale token override"). Внутри контейнера имена остаются
+      # нативными — Hermes читает TELEGRAM_BOT_TOKEN, OPENAI_API_KEY
+      # и т.п. без префикса.
+      TELEGRAM_BOT_TOKEN: ${TA_TELEGRAM_BOT_TOKEN:?TA_TELEGRAM_BOT_TOKEN must be set in .env}
+      TELEGRAM_ALLOWED_USERS: ${TA_TELEGRAM_ALLOWED_USERS:?TA_TELEGRAM_ALLOWED_USERS must be set in .env}
+      OPENAI_BASE_URL: ${TA_OPENAI_BASE_URL:?TA_OPENAI_BASE_URL must be set in .env}
+      OPENAI_API_KEY: ${TA_OPENAI_API_KEY:?TA_OPENAI_API_KEY must be set in .env}
     volumes:
       - ./hermes:/opt/data
       # team.yaml монтируется rw: скилл `team_admin` добавляет новых

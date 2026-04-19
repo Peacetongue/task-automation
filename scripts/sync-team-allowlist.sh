@@ -32,13 +32,13 @@ fi
 
 # Переписать строку TELEGRAM_ALLOWED_USERS= через temp-файл (портативный sed).
 TMP="$(mktemp)"
-awk -v new="TELEGRAM_ALLOWED_USERS=$IDS" '
+awk -v new="TA_TELEGRAM_ALLOWED_USERS=$IDS" '
   BEGIN { replaced = 0 }
-  /^TELEGRAM_ALLOWED_USERS=/ { print new; replaced = 1; next }
+  /^TA_TELEGRAM_ALLOWED_USERS=/ { print new; replaced = 1; next }
   { print }
   END { if (!replaced) print new }
 ' "$ENV_FILE" > "$TMP"
 mv "$TMP" "$ENV_FILE"
 
-echo "✓ TELEGRAM_ALLOWED_USERS синхронизирован: $IDS"
+echo "✓ TA_TELEGRAM_ALLOWED_USERS синхронизирован: $IDS"
 echo "  Для применения: docker compose restart hermes"
