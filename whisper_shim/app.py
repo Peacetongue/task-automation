@@ -50,7 +50,9 @@ async def transcriptions(
     response_format: Optional[str] = Form("json"),
     temperature: Optional[float] = Form(None),
 ) -> JSONResponse:
-    del prompt, temperature  # upstream doesn't use them
+    # Hermes may send response_format="verbose_json" / "text" / "srt" etc.
+    # Upstream COMPANY Transcribe only accepts the literal "json" — override.
+    del response_format, prompt, temperature
 
     audio = await file.read()
     timeout = httpx.Timeout(
@@ -60,16 +62,19 @@ async def transcriptions(
         pool=UPSTREAM_READ_TIMEOUT,
     )
     files = {"file": (file.filename or "audio.bin", audio, file.content_type or "application/octet-stream")}
+    # Only forward fields upstream actually supports (per OpenAPI schema).
+    # stream=false — attempt non-streaming; upstream sometimes ignores it,
+    # but doesn't fail on it. response_format hard-coded to the only value
+    # the OpenAPI schema lists as valid.
     data = {
-        # ↓ The whole reason this shim exists: force non-streaming.
         "stream": "false",
-        "response_format": response_format or "json",
+        "response_format": "json",
         "chunking_strategy": "auto",
     }
-    if model:
-        data["model"] = model
     if language:
         data["language"] = language
+    # Upstream also accepts `model` but no enum is documented — safer to omit.
+    _ = model
 
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
@@ -80,6 +85,12 @@ async def transcriptions(
         raise HTTPException(status_code=504, detail=f"Upstream timeout: {e}") from e
 
     if r.status_code >= 400:
+        # Log upstream error detail so future failures are easier to debug.
+        import logging
+        logging.getLogger("whisper_shim").error(
+            "upstream %s for filename=%r lang=%s size=%d bytes: %s",
+            r.status_code, file.filename, language, len(audio), r.text[:500],
+        )
         raise HTTPException(
             status_code=502,
             detail=f"Upstream {r.status_code}: {r.text[:300]}",
