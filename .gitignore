@@ -22,6 +22,7 @@ hermes/skills/*
 !hermes/skills/aigateway/
 !hermes/skills/team_directory/
 !hermes/skills/team_message/
+!hermes/skills/team_admin/
 !hermes/skills/setup/
 !hermes/skills/jira/
 !hermes/skills/confluence/

@@ -87,7 +87,11 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:?OPENAI_API_KEY must be set in .env}
     volumes:
       - ./hermes:/opt/data
-      - ./config:/opt/data/config:ro         # team.yaml для team_directory skill
+      # team.yaml монтируется rw: скилл `team_admin` добавляет новых
+      # членов прямо из чата (только teamlead может). Защита — в SOUL.md
+      # + в самом скилле (проверка роли + валидация через Jira/GitLab
+      # REST-лукап, чтобы не добавить фейк).
+      - ./config:/opt/data/config
       - hermes_state:/opt/data/sessions
       - corp_tokens:/opt/data/user_tokens    # PAT-ы пользователей per-user
     labels:
