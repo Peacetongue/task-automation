@@ -121,6 +121,43 @@ status, _ = api("POST", f"/projects/{pid}/merge_requests/{mr_iid}/approve")
 status, body = api("GET", f"/projects/{pid}/issues", params={"state": "opened", "assignee_username": "vasya"})
 ```
 
+### User activity (last N days)
+Для быстрого поиска активности пользователя (коммиты, MR, issues):
+```python
+from datetime import datetime, timedelta, timezone
+three_days_ago = (datetime.now(timezone.utc) - timedelta(days=3)).strftime("%Y-%m-%d")
+status, events = api("GET", f"/users/{username}/events", params={"after": three_days_ago, "per_page": 100})
+# events содержит PushEvent, MergeRequestEvent, IssueEvent и т.д.
+# PushEvent: event["commit_count"] — число коммитов в пуше, event["ref"] — ветка
+```
+
+### Search commits across all branches
+Если пользователь ждёт больше коммитов, чем найдено в master/main:
+```python
+# 1. Получить все ветки проекта
+status, branches = api("GET", f"/projects/{pid}/repository/branches")
+
+# 2. Для каждой ветки получить коммиты
+total_commits = 0
+for branch in branches:
+    branch_name = branch["name"]
+    status, commits = api("GET", f"/projects/{pid}/repository/commits", params={
+        "since": three_days_ago,
+        "ref_name": branch_name,
+        "per_page": 100
+    })
+    if status == 200 and commits:
+        # Фильтр по автору
+        author_commits = [c for c in commits if email in c.get("author_email", "") or name == c.get("author_name")]
+        total_commits += len(author_commits)
+```
+
+### Get commits in a specific MR
+```python
+status, mr_commits = api("GET", f"/projects/{pid}/merge_requests/{mr_iid}/commits")
+# Возвращает все коммиты, которые были в MR (даже если squash-нуты в master)
+```
+
 ## Error handling
 
 - `401` → PAT протух или невалиден. Попроси перевыдать.
@@ -139,6 +176,14 @@ status, body = api("GET", f"/projects/{pid}/issues", params={"state": "opened", 
   update — `reviewer_ids` тоже массив. `reviewer_id` (single) — deprecated.
 - **squash + remove_source_branch** — нормальные дефолты для небольших PR,
   но уточни у пользователя если что-то нестандартное.
+- **Коммиты в ветках**: Поиск коммитов только по `default_branch` (master/main)
+  часто пропускает активную работу пользователя в feature-ветках.
+  Если пользователь ждёт больше коммитов, чем найдено:
+  1. Сначала проверь `/users/{username}/events` с `after` (даёт PushEvent, MR events).
+  2. Если нужно детально: получи список веток `/projects/{id}/repository/branches`
+     и для каждой выполни `/projects/{id}/repository/commits?ref_name={branch}`.
+  3. Фильтруй по `author_email` или `author_name` пользователя (из `/user`).
+  4. Учти, что слитые MR могут быть squash-нуты (один коммит вместо многих).
 
 ## Verification
 
