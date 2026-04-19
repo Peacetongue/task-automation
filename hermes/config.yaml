@@ -17,10 +17,10 @@ stt:
   enabled: true
   provider: "openai"
   openai:
-    # COMPANY Transcribe уже выставляет OpenAI-совместимый
-    # /api/v1/audio/transcriptions — идём прямо, без shim-прослойки.
-    # Доступно только изнутри корп.сети (company.loc не резолвится вне VPN).
-    base_url: "http://ml-platform-big.company.loc:9204/api/v1"
+    # whisper-shim форвардит POST /v1/audio/transcriptions в биокадовский
+    # сервис, но с принудительным `stream=false` — иначе тот отдаёт SSE,
+    # который OpenAI-клиент Hermes не понимает.
+    base_url: "http://whisper-shim:9000/v1"
     api_key: "dummy-ignored"
     model: "whisper-1"
 

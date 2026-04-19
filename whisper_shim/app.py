@@ -1,16 +1,20 @@
 """OpenAI-compatible /v1/audio/transcriptions shim over COMPANY Transcribe.
 
-COMPANY Transcribe (ml-platform-big.company.loc:9204) has an async API:
-  POST /api/upload           → {"task_id": "..."}
-  GET  /api/status/{task_id} → {"status": "pending|in_progress|done|failed", ...}
-  GET  /api/result/{task_id} → {"segments": [{"text": "...", ...}], ...}
+COMPANY Transcribe (ml-platform-big.company.loc:9204) already exposes an
+OpenAI-shaped endpoint at /api/v1/audio/transcriptions, BUT:
 
-Hermes' STT tool speaks OpenAI's /v1/audio/transcriptions contract
-(multipart `file`, returns `{"text": "..."}`). We bridge the two.
+  - its default `stream=true` returns an SSE-like stream of
+    `transcript.text.delta` / `transcript.text.done` events, which Hermes'
+    STT client does NOT understand;
+  - `stream=false` returns the plain `{"text": "..."}` that OpenAI clients
+    expect.
+
+Hermes' client has no way to set `stream=false` on its side, so this shim
+sits in the middle, injects that flag, and otherwise forwards the request
+verbatim.
 """
 from __future__ import annotations
 
-import asyncio
 import os
 import socket
 from typing import Optional
@@ -19,79 +23,34 @@ import httpx
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
 
-TRANSCRIBE_SERVICE_URL = os.getenv(
-    "TRANSCRIBE_SERVICE_URL", "http://ml-platform-big.company.loc:9204"
-).rstrip("/")
-POLL_TIMEOUT = float(os.getenv("TRANSCRIBE_POLL_TIMEOUT", "120"))
-POLL_INTERVAL = float(os.getenv("TRANSCRIBE_POLL_INTERVAL", "2"))
-UPSTREAM_CONNECT_TIMEOUT = 10.0
-UPSTREAM_READ_TIMEOUT = 30.0
+UPSTREAM = os.getenv(
+    "TRANSCRIBE_SERVICE_URL",
+    "http://ml-platform-big.company.loc:9204",
+).rstrip("/") + "/api/v1/audio/transcriptions"
 
-app = FastAPI(title="whisper-shim", version="0.1.0")
+UPSTREAM_CONNECT_TIMEOUT = 10.0
+UPSTREAM_READ_TIMEOUT = float(os.getenv("TRANSCRIBE_POLL_TIMEOUT", "120"))
+
+app = FastAPI(title="whisper-shim", version="0.3.0")
 
 
 @app.get("/healthz")
 async def healthz() -> dict:
-    # Unconditional OK: we intentionally do NOT ping the upstream company
-    # host — on macOS dev without VPN, company.loc does not resolve, and we
-    # still want the container's healthcheck to pass so dependents start.
+    # Unconditional OK so docker healthcheck passes even when company.loc
+    # isn't resolvable (macOS dev outside VPN).
     return {"ok": True}
-
-
-def _join_segments(result: dict) -> str:
-    segments = result.get("segments") or []
-    if segments:
-        return " ".join(
-            (s.get("text") or "").strip() for s in segments if s.get("text")
-        ).strip()
-    # Fallback: some deployments return top-level text.
-    return (result.get("text") or "").strip()
-
-
-async def _upload(client: httpx.AsyncClient, audio: bytes, filename: str, content_type: Optional[str]) -> str:
-    files = {"file": (filename or "audio.bin", audio, content_type or "application/octet-stream")}
-    r = await client.post(f"{TRANSCRIBE_SERVICE_URL}/api/upload", files=files)
-    r.raise_for_status()
-    data = r.json()
-    task_id = data.get("task_id") or data.get("id")
-    if not task_id:
-        raise HTTPException(status_code=502, detail=f"Upstream did not return task_id: {data}")
-    return task_id
-
-
-async def _poll(client: httpx.AsyncClient, task_id: str) -> None:
-    deadline = asyncio.get_event_loop().time() + POLL_TIMEOUT
-    while True:
-        r = await client.get(f"{TRANSCRIBE_SERVICE_URL}/api/status/{task_id}")
-        r.raise_for_status()
-        status = (r.json().get("status") or "").lower()
-        if status in ("done", "success", "completed", "finished"):
-            return
-        if status in ("failed", "error"):
-            raise HTTPException(status_code=502, detail=f"Transcribe upstream failed for task {task_id}")
-        if asyncio.get_event_loop().time() >= deadline:
-            raise HTTPException(status_code=504, detail=f"Transcribe timed out after {POLL_TIMEOUT}s")
-        await asyncio.sleep(POLL_INTERVAL)
-
-
-async def _fetch_result(client: httpx.AsyncClient, task_id: str) -> dict:
-    r = await client.get(f"{TRANSCRIBE_SERVICE_URL}/api/result/{task_id}")
-    r.raise_for_status()
-    return r.json()
 
 
 @app.post("/v1/audio/transcriptions")
 async def transcriptions(
     file: UploadFile = File(...),
     model: Optional[str] = Form(None),
-    language: Optional[str] = Form(None),
+    language: Optional[str] = Form("ru"),
     prompt: Optional[str] = Form(None),
     response_format: Optional[str] = Form("json"),
     temperature: Optional[float] = Form(None),
 ) -> JSONResponse:
-    # We accept the OpenAI-shaped knobs (model/language/prompt/...) for
-    # compatibility but COMPANY Transcribe doesn't expose them — discarded.
-    del model, language, prompt, temperature
+    del prompt, temperature  # upstream doesn't use them
 
     audio = await file.read()
     timeout = httpx.Timeout(
@@ -100,21 +59,77 @@ async def transcriptions(
         write=UPSTREAM_READ_TIMEOUT,
         pool=UPSTREAM_READ_TIMEOUT,
     )
+    files = {"file": (file.filename or "audio.bin", audio, file.content_type or "application/octet-stream")}
+    data = {
+        # ↓ The whole reason this shim exists: force non-streaming.
+        "stream": "false",
+        "response_format": response_format or "json",
+        "chunking_strategy": "auto",
+    }
+    if model:
+        data["model"] = model
+    if language:
+        data["language"] = language
+
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
-            task_id = await _upload(client, audio, file.filename or "audio.bin", file.content_type)
-            await _poll(client, task_id)
-            result = await _fetch_result(client, task_id)
+            r = await client.post(UPSTREAM, files=files, data=data)
     except (httpx.ConnectError, socket.gaierror) as e:
-        # company.loc not resolvable (e.g. macOS dev outside VPN) or refused.
         raise HTTPException(status_code=503, detail=f"Transcribe unreachable: {e}") from e
-    except httpx.HTTPStatusError as e:
-        code = e.response.status_code if e.response is not None else 502
-        raise HTTPException(status_code=502, detail=f"Upstream {code}: {e}") from e
     except httpx.TimeoutException as e:
         raise HTTPException(status_code=504, detail=f"Upstream timeout: {e}") from e
 
-    text = _join_segments(result)
-    if response_format == "text":
-        return JSONResponse(content=text, media_type="text/plain")
-    return JSONResponse(content={"text": text})
+    if r.status_code >= 400:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Upstream {r.status_code}: {r.text[:300]}",
+        )
+
+    ctype = r.headers.get("content-type", "")
+    if "application/json" in ctype:
+        body = r.json()
+        # Already in OpenAI shape if the service honored stream=false.
+        if isinstance(body, dict) and "text" in body:
+            return JSONResponse({"text": body["text"]})
+        # Just in case it still streams: find the last 'done' event payload.
+    # Fall-back parser: upstream returned SSE/ndjson even with stream=false.
+    text = _collapse_stream(r.text)
+    return JSONResponse({"text": text})
+
+
+def _collapse_stream(raw: str) -> str:
+    """Best-effort: walk the SSE-like payload and collect the final text.
+
+    Events look like:
+      {"type":"transcript.text.delta","payload":"{\\"delta\\":\\"...\\",...}"}
+      {"type":"transcript.text.done","payload":"{\\"text\\":\\"...\\",...}"}
+    """
+    import json
+    done_text: Optional[str] = None
+    deltas: list[str] = []
+    for chunk in raw.split("}{"):
+        # Naive re-split: braces are unbalanced if multiple JSONs stuck together.
+        if not chunk.strip():
+            continue
+        s = chunk
+        if not s.startswith("{"):
+            s = "{" + s
+        if not s.endswith("}"):
+            s = s + "}"
+        try:
+            obj = json.loads(s)
+        except Exception:
+            continue
+        payload = obj.get("payload")
+        if isinstance(payload, str):
+            try:
+                payload = json.loads(payload)
+            except Exception:
+                continue
+        if not isinstance(payload, dict):
+            continue
+        if obj.get("type") == "transcript.text.done" and "text" in payload:
+            done_text = payload["text"]
+        elif obj.get("type") == "transcript.text.delta" and "delta" in payload:
+            deltas.append(payload["delta"])
+    return (done_text or "".join(deltas)).strip()

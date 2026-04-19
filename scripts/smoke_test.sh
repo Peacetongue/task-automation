@@ -53,12 +53,12 @@ else
   fi
 fi
 
-# ── 3. COMPANY Transcribe reachable (direct, no shim) ───────────────────────
-echo "[3/5] COMPANY Transcribe reachable from hermes container"
-if docker compose exec -T hermes python3 -c "import urllib.request as u; u.urlopen('http://ml-platform-big.company.loc:9204/docs', timeout=5)" 2>/dev/null; then
-  pass "transcribe service reachable from hermes"
+# ── 3. whisper-shim /healthz ────────────────────────────────────────────────
+echo "[3/5] whisper-shim /healthz"
+if curl -fsS --max-time 5 http://localhost:9000/healthz >/dev/null; then
+  pass "whisper-shim /healthz = 200"
 else
-  fail "transcribe service unreachable (VPN? corp net?) — voice will not work"
+  fail "whisper-shim /healthz unreachable on :9000"
 fi
 
 # ── 4. metrics-sidecar /healthz + /metrics ─────────────────────────────────
