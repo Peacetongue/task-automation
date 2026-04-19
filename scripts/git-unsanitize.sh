@@ -6,6 +6,6 @@
 # Stdin → stdout. LC_ALL=C to stay binary-safe on arbitrary file contents.
 set -eu
 exec env LC_ALL=C sed \
-  -e 's/company/company/g' \
-  -e 's/Company/Company/g' \
-  -e 's/COMPANY/COMPANY/g'
+  -e 's/company/biocad/g' \
+  -e 's/Company/Biocad/g' \
+  -e 's/COMPANY/BIOCAD/g'
