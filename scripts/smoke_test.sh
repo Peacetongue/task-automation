@@ -63,12 +63,12 @@ fi
 
 # ── 4. metrics-sidecar /healthz + /metrics ─────────────────────────────────
 echo "[4/5] metrics-sidecar /healthz + /metrics"
-if curl -fsS --max-time 5 http://localhost:8000/healthz >/dev/null; then
+if curl -fsS --max-time 5 http://localhost:18000/healthz >/dev/null; then
   pass "metrics-sidecar /healthz = 200"
 else
-  fail "metrics-sidecar /healthz unreachable on :8000"
+  fail "metrics-sidecar /healthz unreachable on :18000"
 fi
-METRICS="$(curl -s --max-time 5 http://localhost:8000/metrics || true)"
+METRICS="$(curl -s --max-time 5 http://localhost:18000/metrics || true)"
 if echo "$METRICS" | grep -q '^# HELP hermes_'; then
   pass "metrics endpoint exposes hermes_* metrics"
 else

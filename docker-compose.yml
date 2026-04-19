@@ -52,7 +52,11 @@ services:
     restart: unless-stopped
     networks: [tasknet, monitoring]
     ports:
-      - "8000:8000"
+      # На хосте 18000, внутри контейнера 8000. На prod'е 8000 занят чем-то
+      # ещё, 18000 свободен; корп.скрейпер всё равно смотрит по
+      # prometheus_port=8000 (это ВНУТРИконтейнерный порт, внешний маппинг
+      # ему безразличен).
+      - "18000:8000"
     environment:
       HERMES_LOG_PATH: /hermes_data/logs/agent.log
       HERMES_STATE_DB: /hermes_data/state.db
