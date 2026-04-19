@@ -1,0 +1,111 @@
+name: task-automation
+
+networks:
+  tasknet:
+    driver: bridge
+
+volumes:
+  pgdata:
+  vikunja_files:
+  hermes_state:
+
+services:
+  postgres:
+    image: postgres:18
+    restart: unless-stopped
+    networks: [tasknet]
+    environment:
+      POSTGRES_USER: vikunja
+      POSTGRES_PASSWORD: ${VIKUNJA_DB_PASSWORD:?VIKUNJA_DB_PASSWORD must be set in .env}
+      POSTGRES_DB: vikunja
+    volumes:
+      # postgres:18 хочет маунт в /var/lib/postgresql (не .../data) —
+      # данные кладёт в /var/lib/postgresql/{major-version}/docker.
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vikunja -d vikunja"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  vikunja-init:
+    # Named volume mountpoint на macOS создаётся как root:root, а Vikunja
+    # стартует под uid=1000 и падает с "permission denied" при записи
+    # /app/vikunja/files. Одноразовый init-контейнер фиксит owner до того,
+    # как Vikunja попробует писать.
+    image: alpine:3.20
+    command: ["chown", "-R", "1000:1000", "/app/vikunja/files"]
+    volumes:
+      - vikunja_files:/app/vikunja/files
+    restart: "no"
+
+  vikunja:
+    image: vikunja/vikunja:2.3.0
+    restart: unless-stopped
+    networks: [tasknet]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      vikunja-init:
+        condition: service_completed_successfully
+    ports:
+      - "3456:3456"
+    environment:
+      VIKUNJA_SERVICE_PUBLICURL: ${VIKUNJA_PUBLIC_URL:-http://localhost:3456/}
+      # Vikunja 2.3 переименовала JWTSECRET → SECRET (старое имя работает,
+      # но сыпет deprecation warning и задваивает конфиг).
+      VIKUNJA_SERVICE_SECRET: ${VIKUNJA_SERVICE_SECRET:?VIKUNJA_SERVICE_SECRET must be set in .env (openssl rand -hex 32)}
+      VIKUNJA_DATABASE_TYPE: postgres
+      VIKUNJA_DATABASE_HOST: postgres
+      VIKUNJA_DATABASE_USER: vikunja
+      VIKUNJA_DATABASE_PASSWORD: ${VIKUNJA_DB_PASSWORD}
+      VIKUNJA_DATABASE_DATABASE: vikunja
+    volumes:
+      - vikunja_files:/app/vikunja/files
+    # Healthcheck намеренно отсутствует: образ Vikunja distroless — ни
+    # /bin/sh, ни wget, ни curl. Проверка готовности делается со стороны
+    # whisper-shim/hermes через их собственные healthcheck/retry, плюс
+    # scripts/smoke_test.sh бьёт /api/v1/info уже с хоста.
+
+  whisper-shim:
+    build:
+      context: ./whisper_shim
+    restart: unless-stopped
+    networks: [tasknet]
+    ports:
+      - "9000:9000"
+    environment:
+      TRANSCRIBE_SERVICE_URL: ${TRANSCRIBE_SERVICE_URL:-http://ml-platform-big.company.loc:9204}
+      TRANSCRIBE_POLL_TIMEOUT: ${TRANSCRIBE_POLL_TIMEOUT:-120}
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:9000/healthz',timeout=3).status==200 else 1)\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  hermes:
+    image: nousresearch/hermes-agent
+    restart: unless-stopped
+    networks: [tasknet]
+    depends_on:
+      vikunja:
+        condition: service_started
+      whisper-shim:
+        condition: service_started
+    command: ["gateway", "run"]
+    ports:
+      - "8642:8642"
+    environment:
+      HERMES_UID: "10000"
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?TELEGRAM_BOT_TOKEN must be set in .env}
+      TELEGRAM_ALLOWED_USERS: ${TELEGRAM_ALLOWED_USERS:?TELEGRAM_ALLOWED_USERS must be set in .env}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:?OPENAI_BASE_URL must be set in .env}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:?OPENAI_API_KEY must be set in .env}
+      HERMES_MODEL: ${HERMES_MODEL:?HERMES_MODEL must be set (Provider/Name)}
+      VIKUNJA_BASE_URL: http://vikunja:3456
+      VIKUNJA_API_TOKEN: ${VIKUNJA_API_TOKEN:?VIKUNJA_API_TOKEN must be set in .env}
+      VIKUNJA_DEFAULT_PROJECT_ID: ${VIKUNJA_DEFAULT_PROJECT_ID:-1}
+    volumes:
+      - ./hermes:/opt/data
+      - hermes_state:/opt/data/sessions

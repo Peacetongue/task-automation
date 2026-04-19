@@ -1,0 +1,39 @@
+.env
+.env.local
+.env.*.local
+
+# Hermes runtime state — mounted как bind, не коммитим ничего кроме config.yaml и skills/
+hermes/sessions/
+hermes/logs/
+hermes/cache/
+hermes/memories/
+hermes/plans/
+hermes/workspace/
+hermes/home/
+hermes/cron/
+hermes/hooks/
+hermes/skins/
+hermes/.env
+hermes/.skills_prompt_snapshot.json
+
+# Hermes на старте синкает 70+ встроенных скиллов в /opt/data/skills —
+# коммитим только наши. Whitelist через !-паттерны.
+hermes/skills/*
+!hermes/skills/task_parser/
+!hermes/skills/vikunja_create/
+!hermes/skills/ask_clarification/
+!hermes/skills/aigateway/
+hermes/channel_directory.json
+hermes/gateway.pid
+hermes/gateway_state.json
+hermes/state.db*
+hermes/sandboxes/
+hermes/platforms/
+hermes/bin/
+hermes/.local/
+
+# macOS / IDE
+.DS_Store
+.idea/
+.vscode/
+*.swp
