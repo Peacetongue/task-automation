@@ -1,6 +1,6 @@
 ---
 name: jira
-description: Query and modify issues in the corporate on-prem Jira (jira.company.ru) on behalf of the current Telegram user, using their own Personal Access Token stored by the `setup` skill. Covers search via JQL, get/create/comment/transition issues, add assignees by name (via team_directory lookup). Every call is authenticated as the requesting user — the bot never impersonates.
+description: Query and modify issues in the corporate on-prem Jira (jira.biocad.ru) on behalf of the current Telegram user, using their own Personal Access Token stored by the `setup` skill. Covers search via JQL, get/create/comment/transition issues, add assignees by name (via team_directory lookup). Every call is authenticated as the requesting user — the bot never impersonates.
 version: 0.1.0
 metadata:
   hermes:
@@ -9,7 +9,7 @@ metadata:
 
 # jira
 
-Работа с on-prem Jira (`https://jira.company.ru`) от имени текущего
+Работа с on-prem Jira (`https://jira.biocad.ru`) от имени текущего
 пользователя через его PAT.
 
 ## When to Use
@@ -24,13 +24,13 @@ metadata:
 
 Пользователь должен был один раз выполнить `/setup jira <pat>`. Если токена
 нет — ответь инструкцией: «Нужен Jira PAT. Создай тут:
-https://jira.company.ru/secure/ViewProfile.jspa → Personal Access Tokens.
+https://jira.biocad.ru/secure/ViewProfile.jspa → Personal Access Tokens.
 Потом пришли `/setup jira <token>`.»
 
 ## Auth
 
 On-prem Jira 8.14+ принимает PAT как Bearer:
-`Authorization: Bearer <pat>`. Base URL: `https://jira.company.ru`.
+`Authorization: Bearer <pat>`. Base URL: `https://jira.biocad.ru`.
 
 ## Base procedure (каждая операция — один python3 block)
 
@@ -45,7 +45,7 @@ if not pat:
     print("NO_TOKEN"); sys.exit(2)
 
 def api(method, path, body=None):
-    url = f"https://jira.company.ru/rest/api/2{path}"
+    url = f"https://jira.biocad.ru/rest/api/2{path}"
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(url, data=data, method=method, headers={
         "Authorization": f"Bearer {pat}",

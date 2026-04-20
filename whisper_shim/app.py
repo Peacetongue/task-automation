@@ -1,6 +1,6 @@
-"""OpenAI-compatible /v1/audio/transcriptions shim over COMPANY Transcribe.
+"""OpenAI-compatible /v1/audio/transcriptions shim over BIOCAD Transcribe.
 
-COMPANY Transcribe (ml-platform-big.company.loc:9204) already exposes an
+BIOCAD Transcribe (ml-platform-big.biocad.loc:9204) already exposes an
 OpenAI-shaped endpoint at /api/v1/audio/transcriptions, BUT:
 
   - its default `stream=true` returns an SSE-like stream of
@@ -25,7 +25,7 @@ from fastapi.responses import JSONResponse
 
 UPSTREAM = os.getenv(
     "TRANSCRIBE_SERVICE_URL",
-    "http://ml-platform-big.company.loc:9204",
+    "http://ml-platform-big.biocad.loc:9204",
 ).rstrip("/") + "/api/v1/audio/transcriptions"
 
 UPSTREAM_CONNECT_TIMEOUT = 10.0
@@ -36,7 +36,7 @@ app = FastAPI(title="whisper-shim", version="0.3.0")
 
 @app.get("/healthz")
 async def healthz() -> dict:
-    # Unconditional OK so docker healthcheck passes even when company.loc
+    # Unconditional OK so docker healthcheck passes even when biocad.loc
     # isn't resolvable (macOS dev outside VPN).
     return {"ok": True}
 
@@ -51,7 +51,7 @@ async def transcriptions(
     temperature: Optional[float] = Form(None),
 ) -> JSONResponse:
     # Hermes may send response_format="verbose_json" / "text" / "srt" etc.
-    # Upstream COMPANY Transcribe only accepts the literal "json" — override.
+    # Upstream BIOCAD Transcribe only accepts the literal "json" — override.
     del response_format, prompt, temperature
 
     audio = await file.read()

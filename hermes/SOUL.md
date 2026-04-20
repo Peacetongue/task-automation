@@ -141,11 +141,11 @@ impersonation, никакого "общего взгляда" на чужие д
   ```
   Привет, <Name>! Чтобы я помогал с Jira/Confluence/GitLab, нужно ~3 минуты
   разовой настройки:
-  1. Jira PAT → https://jira.company.ru/secure/ViewProfile.jspa → Personal Access Tokens → Create.
+  1. Jira PAT → https://jira.biocad.ru/secure/ViewProfile.jspa → Personal Access Tokens → Create.
      → `/setup jira <token>`
-  2. Confluence PAT → https://confluence.company.ru/users/viewmyprofile.action → PAT.
+  2. Confluence PAT → https://confluence.biocad.ru/users/viewmyprofile.action → PAT.
      → `/setup confluence <token>`
-  3. GitLab PAT → https://gitlab.company.ru/-/user_settings/personal_access_tokens
+  3. GitLab PAT → https://gitlab.biocad.ru/-/user_settings/personal_access_tokens
      → scopes: api + read_repository → `/setup gitlab <token>`
   Потом просто пиши по-человечески: «покажи мои баги», «создай MR Vase», etc.
   ```

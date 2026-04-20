@@ -16,7 +16,7 @@ volumes:
 
 services:
   whisper-shim:
-    # COMPANY Transcribe уже предоставляет /api/v1/audio/transcriptions, но
+    # BIOCAD Transcribe уже предоставляет /api/v1/audio/transcriptions, но
     # по умолчанию отвечает SSE-стримом (`stream=true` — OpenAI-клиент
     # Hermes такой формат не понимает). Shim форвардит запрос и дополняет
     # его `stream=false`, после чего возвращает {"text": "..."} в OpenAI-
@@ -32,7 +32,7 @@ services:
       # (export TRANSCRIBE_SERVICE_URL где-нибудь в .bashrc ломал бы сборку).
       # Внутрь контейнера приходит обычное имя — whisper_shim/app.py
       # читает TRANSCRIBE_SERVICE_URL без префикса.
-      TRANSCRIBE_SERVICE_URL: ${TA_TRANSCRIBE_SERVICE_URL:-http://ml-platform-big.company.loc:9204}
+      TRANSCRIBE_SERVICE_URL: ${TA_TRANSCRIBE_SERVICE_URL:-http://ml-platform-big.biocad.loc:9204}
       TRANSCRIBE_POLL_TIMEOUT: ${TA_TRANSCRIBE_POLL_TIMEOUT:-120}
     healthcheck:
       test: ["CMD-SHELL", "python3 -c \"import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:9000/healthz',timeout=3).status==200 else 1)\""]

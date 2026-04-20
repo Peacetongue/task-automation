@@ -109,7 +109,7 @@ import json, os, pathlib, re, urllib.request
 user_id = os.environ["TELEGRAM_USER_ID"]
 tokens = json.loads(pathlib.Path(f"/opt/data/user_tokens/{user_id}.json").read_text())
 pat = tokens["jira"]["token"]
-req = urllib.request.Request("https://jira.company.ru/rest/api/2/myself",
+req = urllib.request.Request("https://jira.biocad.ru/rest/api/2/myself",
                              headers={"Authorization": f"Bearer {pat}", "Accept":"application/json"})
 with urllib.request.urlopen(req, timeout=10) as r:
     me = json.loads(r.read())
@@ -135,7 +135,7 @@ PY
 ```
 
 ### После `/setup gitlab <pat>`
-Аналогично, `GET https://gitlab.company.ru/api/v4/user` → `username`,
+Аналогично, `GET https://gitlab.biocad.ru/api/v4/user` → `username`,
 подмени `gitlab_username: "TODO:fill-on-first-setup"` на реальный.
 
 ### Тон рапорта

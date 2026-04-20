@@ -1,6 +1,6 @@
 ---
 name: gitlab
-description: Work with issues and merge requests on the corporate on-prem GitLab (gitlab.company.ru) on behalf of the current Telegram user, using their own Personal Access Token stored by the `setup` skill. Covers listing/searching issues and MRs, creating MRs, commenting, setting assignees/reviewers by name via team_directory lookup.
+description: Work with issues and merge requests on the corporate on-prem GitLab (gitlab.biocad.ru) on behalf of the current Telegram user, using their own Personal Access Token stored by the `setup` skill. Covers listing/searching issues and MRs, creating MRs, commenting, setting assignees/reviewers by name via team_directory lookup.
 version: 0.1.0
 metadata:
   hermes:
@@ -20,7 +20,7 @@ On-prem GitLab через REST API v4 с user's PAT.
 
 ## Prereq
 
-PAT через `/setup gitlab <pat>`. Создание токена: `https://gitlab.company.ru/-/user_settings/personal_access_tokens`
+PAT через `/setup gitlab <pat>`. Создание токена: `https://gitlab.biocad.ru/-/user_settings/personal_access_tokens`
 → Add new token → scopes: `api` (обязательно) + `read_repository` (опционально
 для просмотра кода). Срок — 6-12 месяцев.
 
@@ -29,7 +29,7 @@ PAT через `/setup gitlab <pat>`. Создание токена: `https://gi
 `Authorization: Bearer <pat>` (или `PRIVATE-TOKEN: <pat>` header, оба
 работают на GitLab DC). Используем Bearer для единообразия.
 
-Base URL: `https://gitlab.company.ru/api/v4`.
+Base URL: `https://gitlab.biocad.ru/api/v4`.
 
 ## Base call
 
@@ -43,7 +43,7 @@ pat = tokens.get("gitlab", {}).get("token")
 if not pat:
     print("NO_TOKEN"); sys.exit(2)
 
-BASE = "https://gitlab.company.ru/api/v4"
+BASE = "https://gitlab.biocad.ru/api/v4"
 
 def api(method, path, body=None, params=None):
     url = BASE + path + (("?" + urllib.parse.urlencode(params, doseq=True)) if params else "")

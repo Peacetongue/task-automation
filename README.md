@@ -3,13 +3,13 @@
 Локальный стек, поднимающий корпоративного Telegram-ассистента для
 пилотной команды. Сотрудник пишет боту — бот ходит от его имени в:
 
-- **on-prem Jira** (`jira.company.ru`) — поиск/создание/обновление issue.
-- **on-prem Confluence** (`confluence.company.ru`) — поиск/чтение/создание страниц.
-- **on-prem GitLab** (`gitlab.company.ru`) — MR, issues, комментарии.
+- **on-prem Jira** (`jira.biocad.ru`) — поиск/создание/обновление issue.
+- **on-prem Confluence** (`confluence.biocad.ru`) — поиск/чтение/создание страниц.
+- **on-prem GitLab** (`gitlab.biocad.ru`) — MR, issues, комментарии.
 - пересылка сообщений между членами команды.
 
-LLM — **только** через корп.AI Gateway (`aigateway.company.ru/api/v2`).
-Транскрипция voice-сообщений — через shim поверх COMPANY Transcribe.
+LLM — **только** через корп.AI Gateway (`aigateway.biocad.ru/api/v2`).
+Транскрипция voice-сообщений — через shim поверх BIOCAD Transcribe.
 
 ## Архитектура
 
@@ -18,7 +18,7 @@ Telegram ──► Hermes (per-user session)
               │
               ├──► AI Gateway  (LLM, InHouse/Qwen3.5-122B)
               │
-              ├──► whisper-shim ──► COMPANY Transcribe  (voice)
+              ├──► whisper-shim ──► BIOCAD Transcribe  (voice)
               │
               └──► (REST с PAT пользователя) ──► Jira / Confluence / GitLab
 
@@ -31,8 +31,8 @@ metrics-sidecar ── tail agent.log + poll state.db ── /metrics → Victor
 
 - Docker Desktop ≥ 4.30 (macOS dev) или Engine + compose plugin v2 (Linux prod).
 - `jq` для `scripts/smoke_test.sh`.
-- Доступ в корп.сеть COMPANY (`aigateway.company.ru`, `ml-platform-big.company.loc`,
-  `jira.company.ru`, `confluence.company.ru`, `gitlab.company.ru`).
+- Доступ в корп.сеть BIOCAD (`aigateway.biocad.ru`, `ml-platform-big.biocad.loc`,
+  `jira.biocad.ru`, `confluence.biocad.ru`, `gitlab.biocad.ru`).
 - Сеть `monitoring` (Docker external):
   ```bash
   docker network create monitoring
@@ -107,14 +107,14 @@ docker compose restart hermes
 
 ## Known caveats
 
-- **Voice вне корп.сети.** Без VPN `ml-platform-big.company.loc` не резолвится —
+- **Voice вне корп.сети.** Без VPN `ml-platform-big.biocad.loc` не резолвится —
   shim отдаст 503, бот сообщит "Transcribe unreachable". Текстовые задачи
   работают.
 - **Перенос на prod.** Compose тот же. Сеть `monitoring` уже есть у devops'а.
   После первого старта на prod — тот же `/setup` для каждого сотрудника
   отдельно (тома `corp_tokens` и `hermes_state` живут в named volumes, между
   машинами не шарятся).
-- **Gitlab.com vs on-prem.** Скиллы заточены под on-prem `gitlab.company.ru`.
+- **Gitlab.com vs on-prem.** Скиллы заточены под on-prem `gitlab.biocad.ru`.
   При миграции на другой URL — правка base-URL в `hermes/skills/gitlab/SKILL.md`.
 - **PAT expiry.** Pилотные PAT-ы обычно на 6-12 месяцев. Бот вернёт
   `401 unauthorized` когда истекут, и попросит `/setup` заново.
@@ -136,7 +136,7 @@ hermes/
   config.yaml                  # модель, STT, telegram, platform_toolsets
   SOUL.md                      # персона + маршрутизация + security rules
   skills/
-    aigateway/                 # справочник про COMPANY AI Gateway
+    aigateway/                 # справочник про BIOCAD AI Gateway
     team_directory/            # find_user_by_name, list_team, ...
     team_message/              # cross-user DM и broadcast
     setup/                     # /setup <service> <pat>
@@ -148,7 +148,7 @@ metrics_sidecar/               # tail logs + SQLite → /metrics (Prometheus)
 scripts/
   smoke_test.sh                # проверка стека
   sync-team-allowlist.sh       # team.yaml → TELEGRAM_ALLOWED_USERS в .env
-  git-sanitize.sh              # clean-фильтр company→company при git add
+  git-sanitize.sh              # clean-фильтр biocad→company при git add
   setup-git-sanitize.sh        # бутстрап фильтра на свежем клоне
 docker-compose.yml             # hermes + whisper-shim + metrics-sidecar
 ```

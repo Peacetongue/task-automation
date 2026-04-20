@@ -1,6 +1,6 @@
 ---
 name: confluence
-description: Read and write pages in the corporate on-prem Confluence (confluence.company.ru) on behalf of the current Telegram user, using their own Personal Access Token stored by the `setup` skill. Covers CQL search, fetching a page by id or title, creating drafts, commenting. Never impersonates — each call is under the requesting user's identity.
+description: Read and write pages in the corporate on-prem Confluence (confluence.biocad.ru) on behalf of the current Telegram user, using their own Personal Access Token stored by the `setup` skill. Covers CQL search, fetching a page by id or title, creating drafts, commenting. Never impersonates — each call is under the requesting user's identity.
 version: 0.1.0
 metadata:
   hermes:
@@ -21,12 +21,12 @@ On-prem Confluence DC через user's PAT.
 
 PAT Confluence через `/setup confluence <pat>`. Если нет — выведи
 инструкцию: создай в
-`https://confluence.company.ru/users/viewmyprofile.action` → Personal Access
+`https://confluence.biocad.ru/users/viewmyprofile.action` → Personal Access
 Tokens → Create → `/setup confluence <token>`.
 
 ## Auth
 
-`Authorization: Bearer <pat>`. Base URL: `https://confluence.company.ru`.
+`Authorization: Bearer <pat>`. Base URL: `https://confluence.biocad.ru`.
 
 ## Base call
 
@@ -41,7 +41,7 @@ if not pat:
     print("NO_TOKEN"); sys.exit(2)
 
 def api(method, path, body=None, params=None):
-    url = f"https://confluence.company.ru/rest/api{path}"
+    url = f"https://confluence.biocad.ru/rest/api{path}"
     if params: url += "?" + urllib.parse.urlencode(params)
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(url, data=data, method=method, headers={

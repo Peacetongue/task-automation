@@ -1,6 +1,6 @@
 ---
 name: aigateway
-description: Reference handbook for the COMPANY AI Gateway (the only LLM channel this stack is allowed to use). Covers the Provider/Name model-naming rule, how to list available models via GET /api/v2/models, custom headers (trace-id, budget-soft-check, bypass-safety-check), and the non-standard /rerank endpoint.
+description: Reference handbook for the BIOCAD AI Gateway (the only LLM channel this stack is allowed to use). Covers the Provider/Name model-naming rule, how to list available models via GET /api/v2/models, custom headers (trace-id, budget-soft-check, bypass-safety-check), and the non-standard /rerank endpoint.
 version: 0.1.0
 metadata:
   hermes:
@@ -9,7 +9,7 @@ metadata:
 
 # aigateway
 
-Мини-хэндбук по корпоративному COMPANY AI Gateway. **Единственный разрешённый канал для LLM** в этом стеке — ни OpenAI напрямую, ни Anthropic, ни локальные модели не используются.
+Мини-хэндбук по корпоративному BIOCAD AI Gateway. **Единственный разрешённый канал для LLM** в этом стеке — ни OpenAI напрямую, ни Anthropic, ни локальные модели не используются.
 
 ## When to Use
 
@@ -20,11 +20,11 @@ metadata:
 
 ## Base
 
-- URL: `https://aigateway.company.ru/api/v2`
+- URL: `https://aigateway.biocad.ru/api/v2`
 - Auth: `Authorization: Bearer ${OPENAI_API_KEY}` (ключ начинается с `sk-`).
 - OpenAI-совместимые эндпоинты: `/chat/completions`, `/embeddings`, `/models`.
 - НЕстандартный: `/rerank`.
-- **НЕТ** `/audio/transcriptions` — для STT используется отдельный shim (`whisper-shim` → COMPANY Transcribe).
+- **НЕТ** `/audio/transcriptions` — для STT используется отдельный shim (`whisper-shim` → BIOCAD Transcribe).
 
 ## Model naming — обязательный формат `Provider/Name`
 
